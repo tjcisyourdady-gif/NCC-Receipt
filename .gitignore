@@ -4,7 +4,10 @@ __pycache__/
 build/
 dist/
 release/
+release_upload/
 outputs/
+.updates/
+.release-secrets/
 *.exe
 *.zip
 *.log

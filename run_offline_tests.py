@@ -9,6 +9,7 @@ TEST_MODULES = [
     'test_receipt_distribution',
     'test_receipt_mapping_table',
     'test_receipt_payer_remark',
+    'test_receipt_updater',
     'test_tool_helpers',
     'test_tool_regressions',
 ]

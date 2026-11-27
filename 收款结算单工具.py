@@ -35,6 +35,9 @@ from receipt_data_rules import (
     load_receipt_workbook, read_receipt_macro,
     normalize_receipt_value, normalize_receipt_row, receipt_sheet_layout,
 )
+from receipt_release_identity import APP_VERSION as RECEIPT_APP_VERSION
+from receipt_updater import UpdateManager as ReceiptUpdateManager
+from receipt_update_dialog import ReceiptUpdateController
 
 try:
     from receipt_excel_converter import start_conversion_wizard
@@ -7630,6 +7633,64 @@ ttk.Button(
     width=14,
 ).pack(side='left', padx=(8, 0))
 
+# ---------- 自动检测更新 ----------
+update_status_var = tk.StringVar(
+    value=f'V{RECEIPT_APP_VERSION} | 启动后自动后台检测更新…'
+)
+receipt_updater = ReceiptUpdateManager(application_directory())
+
+
+def _is_receipt_app_busy():
+    return bool(
+        (current_thread is not None and current_thread.is_alive())
+        or getattr(root, '_receipt_conversion_busy', False)
+    )
+
+
+def _set_update_install_lock(locked):
+    if 'run_button' in globals() and run_button is not None:
+        run_button.configure(state='disabled' if locked else 'normal')
+    set_time_settings_running(locked)
+    set_fill_order_settings_running(locked)
+
+
+def _exit_for_update_install():
+    try:
+        root.destroy()
+    except tk.TclError:
+        pass
+
+
+update_controller = ReceiptUpdateController(
+    root=root,
+    updater=receipt_updater,
+    is_busy=_is_receipt_app_busy,
+    on_lock_change=_set_update_install_lock,
+    on_request_exit=_exit_for_update_install,
+    status_var=update_status_var,
+)
+
+update_frame = ttk.Frame(frame1)
+update_frame.pack(fill='x', pady=(4, 1))
+ttk.Label(
+    update_frame, text='版本自动更新：', font=('微软雅黑', 9)
+).pack(side='left')
+update_settings_button = ttk.Button(
+    update_frame,
+    text='检查/自动更新...',
+    command=update_controller.open_update_dialog,
+    width=14,
+)
+update_settings_button.pack(side='left', padx=(8, 0))
+ttk.Label(
+    frame1,
+    textvariable=update_status_var,
+    foreground='#555555',
+    font=('微软雅黑', 8),
+    wraplength=390,
+    justify='left',
+).pack(anchor='w', pady=(2, 0))
+
 # ---------- 文件选择区 ----------
 file_frame = ttk.LabelFrame(root, text='文件选择', padding=(10, 5))
 file_frame.pack(fill='x', padx=12, pady=6)
@@ -7724,6 +7785,9 @@ def _task_entry(
 
 def start():
     global current_thread
+    if update_controller.update_installing:
+        messagebox.showwarning('正在更新', '正在安装新版本，完成后将自动重启，请稍候。')
+        return
     if getattr(root, '_receipt_conversion_busy', False):
         messagebox.showwarning('正在转换', '请等待底稿转换完成后再开始填报。')
         return
@@ -7891,6 +7955,9 @@ def _close_when_worker_stops():
 
 def on_close():
     global closing_requested
+    if update_controller.update_installing:
+        print('正在安装自动更新，完成后将自动重启，请稍候......')
+        return
     if current_thread is not None and current_thread.is_alive():
         if closing_requested:
             return
@@ -7902,16 +7969,19 @@ def on_close():
         ):
             return
         closing_requested = True
+        update_controller.cancel_timers()
         stop_event.set()
         set_task_paused(False)
         print('已请求停止并退出，正在等待工作线程安全结束......')
         _close_when_worker_stops()
         return
+    update_controller.cancel_timers()
     root.destroy()
 
 
 root.protocol('WM_DELETE_WINDOW', on_close)
 root.after(timing_ms('gui_poll_interval'), poll_ui_messages)
+update_controller.schedule()
 # 宽度保持红框尺寸，高度严格按当前控件所需空间计算，避免底部空白。
 root.update_idletasks()
 root.geometry(f'430x{root.winfo_reqheight()}')

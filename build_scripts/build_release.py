@@ -17,12 +17,15 @@ def build_variants(python_exe: str, out_dir: Path, tcl_dir: Path | None = None):
     if dist_dir.exists():
         shutil.rmtree(dist_dir)
 
-    extra_datas = []
+    extra_datas = [
+        (str(REPO_ROOT / 'update_public_key.json'), '.'),
+        (str(REPO_ROOT / 'update_install.ps1'), '.'),
+    ]
     extra_binaries = []
     extra_hooks = []
     extra_rthooks = []
     if tcl_dir is not None and tcl_dir.is_dir():
-        extra_datas = [
+        extra_datas += [
             (str(tcl_dir / '_tcl_data'), '_tcl_data'),
             (str(tcl_dir / '_tk_data'), '_tk_data'),
         ]
