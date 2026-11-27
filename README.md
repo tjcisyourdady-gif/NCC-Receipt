@@ -55,4 +55,17 @@ python -m pip install -r requirements-build.txt
 python build_scripts/build_release.py
 ```
 
-> 隐私说明：本仓库源码、测试、模板与公开 Release 发行包均不包含任何真实业务数据、银行账号、登录凭据或个人运行日志。
+## 发布维护（强制双包上传规范）
+
+每次发布新版本到 GitHub Releases 时，**必须同时准备并上传两个压缩包**：
+1. **轻量更新包**（`NCC_receipt_<版本>_update.zip`）：仅含双版本 EXE、说明文档与调试脚本，供客户端自动更新下载，保留用户现有浏览器与模板数据。
+2. **完整离线包**（`NCC_receipt_<版本>_full.zip`）：含双版本 EXE、内置 Chromium、空白 33 列宏模板、空白对照表方案与说明文档，供新用户直接解压使用。
+
+标准发布命令（`prepare_update_release.py` 与 `publish_receipt_release.py` 均强制校验两包齐全且模板无业务数据）：
+
+```powershell
+python prepare_update_release.py --update-archive <轻量更新包.zip> --full-archive <完整离线包.zip>
+python publish_receipt_release.py release_upload\<版本号> --publish
+```
+
+> 隐私说明：本仓库源码、测试、模板与公开 Release 发行包均不包含任何真实业务数据、银行账号、登录凭据或个人运行日志。签名私钥仅经发布者本机 Windows DPAPI 加密存放在 `.release-secrets/` 中，绝不入库也不进发行包。

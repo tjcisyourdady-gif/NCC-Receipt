@@ -13,6 +13,7 @@ import zipfile
 import receipt_release_identity as identity
 import receipt_updater as updater
 import prepare_update_release as prep
+import publish_receipt_release as publisher
 
 REPO = Path(__file__).resolve().parent
 
@@ -217,16 +218,34 @@ class ReceiptUpdaterTests(unittest.TestCase):
             up_state = mgr.check()
         self.assertEqual(up_state['status'], 'up_to_date')
 
-    def test_prepare_update_release_rejects_browser_and_personal_configs(self):
+    def test_prepare_and_publish_enforce_both_update_and_full_packages(self):
+        clean_update = self.tmp / 'clean_update.zip'
+        make_zip(clean_update, {
+            f'收款结算填写工具/{identity.EXE_NAMES[0]}': b'exe1',
+            f'收款结算填写工具/{identity.EXE_NAMES[1]}': b'exe2',
+            '收款结算填写工具/V7双版本及GUI功能说明.txt': '说明'.encode('utf-8'),
+        })
+        clean_full = self.tmp / 'clean_full.zip'
+        make_zip(clean_full, {
+            f'收款结算填写工具/{identity.EXE_NAMES[0]}': b'exe1',
+            f'收款结算填写工具/{identity.EXE_NAMES[1]}': b'exe2',
+            '收款结算填写工具/V7双版本及GUI功能说明.txt': '说明'.encode('utf-8'),
+            '收款结算填写工具/收款结算单底稿导入模板.xlsm': (REPO / '收款结算单底稿导入模板.xlsm').read_bytes(),
+            '收款结算填写工具/对照表方案.xlsx': (REPO / '对照表方案.xlsx').read_bytes(),
+            '收款结算填写工具/ms-playwright（勿动）/chromium-1161/chrome-win/chrome.exe': b'chrome',
+        })
+
+        # 1. 轻量包包含浏览器必须拒绝
         bad_browser = self.tmp / 'with_browser.zip'
         make_zip(bad_browser, {
             f'收款结算填写工具/{identity.EXE_NAMES[0]}': b'1',
             f'收款结算填写工具/{identity.EXE_NAMES[1]}': b'2',
-            '收款结算填写工具/ms-playwright（勿动）/chromium-1161/chrome.exe': b'3',
+            '收款结算填写工具/ms-playwright（勿动）/chromium-1161/chrome-win/chrome.exe': b'3',
         })
         with self.assertRaisesRegex(ValueError, '不得包含内置浏览器'):
-            prep.prepare(bad_browser, destination=self.tmp / 'out1', update_only=True)
+            prep.prepare(bad_browser, clean_full, destination=self.tmp / 'out1')
 
+        # 2. 轻量包包含个人配置必须拒绝
         bad_cfg = self.tmp / 'with_cfg.zip'
         make_zip(bad_cfg, {
             f'收款结算填写工具/{identity.EXE_NAMES[0]}': b'1',
@@ -234,7 +253,28 @@ class ReceiptUpdaterTests(unittest.TestCase):
             '收款结算填写工具/收款结算单填写顺序设置.json': b'{}',
         })
         with self.assertRaisesRegex(ValueError, '不得包含个人配置'):
-            prep.prepare(bad_cfg, destination=self.tmp / 'out2', update_only=True)
+            prep.prepare(bad_cfg, clean_full, destination=self.tmp / 'out2')
+
+        # 3. 完整包缺少浏览器必须拒绝
+        with self.assertRaisesRegex(ValueError, '缺少内置 Chromium'):
+            prep.prepare(clean_update, clean_update, destination=self.tmp / 'out3')
+
+        # 4. 完整包 + 轻量包齐全时，生成的 release-plan.json 同时记录 update 与 full 且通过发布前校验
+        if (REPO / '.release-secrets' / 'ncc-receipt-signing.dpapi').is_file():
+            out_ok = prep.prepare(clean_update, clean_full, destination=self.tmp / 'out_ok')
+            plan, verified, _manifest_bytes, resolved = publisher.validate_release_folder(out_ok)
+            self.assertEqual([role for role, _ in resolved], ['update', 'full'])
+            self.assertEqual(len(plan['assets']), 2)
+            self.assertEqual(verified['version'], identity.APP_VERSION)
+
+            # 若人为删掉 full 记录，发布脚本必须拒绝
+            broken_plan = dict(plan, assets=[plan['assets'][0]])
+            (out_ok / 'release-plan.json').write_text(
+                json.dumps(broken_plan, ensure_ascii=False, indent=2),
+                encoding='utf-8',
+            )
+            with self.assertRaisesRegex(ValueError, '必须同时上传轻量更新包'):
+                publisher.validate_release_folder(out_ok)
 
     def test_gui_and_build_script_wire_auto_updater(self):
         main_src = (REPO / '收款结算单工具.py').read_text(encoding='utf-8-sig')
